@@ -8,17 +8,6 @@
 
 ---
 
-## Live Demo
-
-> **Dashboard:** _[Replace with your deployed frontend URL — e.g. Netlify link]_
->
-> **API endpoint:** `https://7ah23zrgyi.execute-api.us-east-1.amazonaws.com/opportunities`
-
-<!-- Add a screenshot here once the dashboard has live data
-![BuilderRadar AI Dashboard](docs/screenshot.png)
--->
-
----
 
 ## Architecture
 
