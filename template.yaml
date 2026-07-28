@@ -1,0 +1,403 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  BuilderRadar AI — Student opportunity discovery agent.
+  Budget-optimized: on-demand DynamoDB, minimal Lambda memory,
+  HTTP API Gateway, EventBridge scheduling.
+
+# ---------------------------------------------------------------------------
+# Parameters
+# ---------------------------------------------------------------------------
+Parameters:
+  Env:
+    Type: String
+    Default: dev
+    AllowedValues: [dev, prod]
+    Description: Deployment environment
+
+# ---------------------------------------------------------------------------
+# Globals — applied to all Lambda functions unless overridden
+# ---------------------------------------------------------------------------
+Globals:
+  Function:
+    Runtime: python3.13
+    Architectures: [arm64]          # arm64 is ~20% cheaper than x86_64
+    Environment:
+      Variables:
+        TABLE_NAME: !Ref OpportunitiesTable
+        ENV: !Ref Env
+
+# ---------------------------------------------------------------------------
+# Resources — filled in incrementally by phase
+# ---------------------------------------------------------------------------
+Resources:
+
+  # ── Phase 2: DynamoDB ────────────────────────────────────────────────────
+
+  OpportunitiesTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain           # never drop data on stack updates
+    UpdateReplacePolicy: Retain
+    Properties:
+      TableName: !Sub "builderradar-opportunities-${Env}"
+      BillingMode: PAY_PER_REQUEST   # on-demand — no provisioned capacity cost
+      AttributeDefinitions:
+        - AttributeName: id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: id
+          KeyType: HASH
+      Tags:
+        - Key: Project
+          Value: BuilderRadar
+        - Key: Env
+          Value: !Ref Env
+
+  # ── Phase 2: CloudWatch Log Groups (7-day retention) ─────────────────────
+
+  DevpostScraperLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/builderradar-devpost-scraper-${Env}"
+      RetentionInDays: 7
+
+  UnstopScraperLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/builderradar-unstop-scraper-${Env}"
+      RetentionInDays: 7
+
+  AgentTriggerLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/builderradar-agent-trigger-${Env}"
+      RetentionInDays: 7
+
+  ApiHandlerLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/builderradar-api-handler-${Env}"
+      RetentionInDays: 7
+
+  # ── Phase 4: Devpost scraper ─────────────────────────────────────────────
+
+  DevpostScraperRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "BuilderRadarDevpostScraperRole-${Env}"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: DevpostScraperPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              # Write new items — conditional put only
+              - Effect: Allow
+                Action: dynamodb:PutItem
+                Resource: !GetAtt OpportunitiesTable.Arn
+              # Emit NewOpportunities event to default bus
+              - Effect: Allow
+                Action: events:PutEvents
+                Resource: !Sub "arn:aws:events:${AWS::Region}:${AWS::AccountId}:event-bus/default"
+              # Write logs to the pre-created log group
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !GetAtt DevpostScraperLogGroup.Arn
+
+  DevpostScraperFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "builderradar-devpost-scraper-${Env}"
+      CodeUri: functions/devpost_scraper/
+      Handler: handler.handler
+      Role: !GetAtt DevpostScraperRole.Arn
+      MemorySize: 128
+      Timeout: 30
+      Environment:
+        Variables:
+          EVENT_BUS_NAME: default
+
+  DevpostScraperSchedule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: !Sub "builderradar-devpost-schedule-${Env}"
+      Description: "Trigger Devpost scraper twice daily"
+      # 08:00 UTC and 20:00 UTC every day
+      ScheduleExpression: "cron(0 8,20 * * ? *)"
+      State: ENABLED
+      Targets:
+        - Id: DevpostScraperTarget
+          Arn: !GetAtt DevpostScraperFunction.Arn
+
+  DevpostScraperSchedulePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !GetAtt DevpostScraperFunction.Arn
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt DevpostScraperSchedule.Arn
+
+  # ── Phase 5: Unstop scraper ──────────────────────────────────────────────
+
+  UnstopScraperRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "BuilderRadarUnstopScraperRole-${Env}"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: UnstopScraperPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: dynamodb:PutItem
+                Resource: !GetAtt OpportunitiesTable.Arn
+              - Effect: Allow
+                Action: events:PutEvents
+                Resource: !Sub "arn:aws:events:${AWS::Region}:${AWS::AccountId}:event-bus/default"
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !GetAtt UnstopScraperLogGroup.Arn
+
+  UnstopScraperFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "builderradar-unstop-scraper-${Env}"
+      CodeUri: functions/unstop_scraper/
+      Handler: handler.handler
+      Role: !GetAtt UnstopScraperRole.Arn
+      MemorySize: 128
+      Timeout: 30
+      Environment:
+        Variables:
+          EVENT_BUS_NAME: default
+
+  UnstopScraperSchedule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: !Sub "builderradar-unstop-schedule-${Env}"
+      Description: "Trigger Unstop scraper twice daily"
+      ScheduleExpression: "cron(0 8,20 * * ? *)"
+      State: ENABLED
+      Targets:
+        - Id: UnstopScraperTarget
+          Arn: !GetAtt UnstopScraperFunction.Arn
+
+  UnstopScraperSchedulePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !GetAtt UnstopScraperFunction.Arn
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt UnstopScraperSchedule.Arn
+
+  # ── Phase 6: Agent trigger ───────────────────────────────────────────────
+
+  AgentTriggerRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "BuilderRadarAgentTriggerRole-${Env}"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: AgentTriggerPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              # Invoke the deployed AgentCore agent
+              # ⚠️ COST-FLAG: InvokeAgent triggers Bedrock model calls.
+              # Scoped to the specific agent ARN set via AGENTCORE_AGENT_ID.
+              # Wildcard here until agent is deployed; tighten after launch.
+              - Effect: Allow
+                Action:
+                  - bedrock:InvokeAgent
+                Resource: "*"
+              # Read raw items to pass IDs to the agent
+              - Effect: Allow
+                Action: dynamodb:GetItem
+                Resource: !GetAtt OpportunitiesTable.Arn
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !GetAtt AgentTriggerLogGroup.Arn
+
+  AgentTriggerFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "builderradar-agent-trigger-${Env}"
+      CodeUri: functions/agent_trigger/
+      Handler: handler.handler
+      Role: !GetAtt AgentTriggerRole.Arn
+      MemorySize: 256
+      Timeout: 300           # 5 minutes — agent enrichment may take up to 2 min
+      Environment:
+        Variables:
+          AGENT_ITEM_CAP: "4"
+          # Set these after running: agentcore launch
+          AGENTCORE_AGENT_ID: ""
+          AGENTCORE_AGENT_ALIAS_ID: "TSTALIASID"
+
+  AgentTriggerEventRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: !Sub "builderradar-agent-trigger-rule-${Env}"
+      Description: "Invoke agent when scrapers find new opportunities"
+      EventPattern:
+        source:
+          - "builderradar.ingestion"
+        detail-type:
+          - "NewOpportunities"
+      State: ENABLED
+      Targets:
+        - Id: AgentTriggerTarget
+          Arn: !GetAtt AgentTriggerFunction.Arn
+
+  AgentTriggerEventPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !GetAtt AgentTriggerFunction.Arn
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt AgentTriggerEventRule.Arn
+
+  # ── Phase 7: API handler + API Gateway ───────────────────────────────────
+
+  ApiHandlerRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "BuilderRadarApiHandlerRole-${Env}"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: ApiHandlerPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              # Read-only scan — no writes from the API path ever
+              - Effect: Allow
+                Action: dynamodb:Scan
+                Resource: !GetAtt OpportunitiesTable.Arn
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !GetAtt ApiHandlerLogGroup.Arn
+
+  ApiHandlerFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "builderradar-api-handler-${Env}"
+      CodeUri: functions/api_handler/
+      Handler: handler.handler
+      Role: !GetAtt ApiHandlerRole.Arn
+      MemorySize: 128
+      Timeout: 10
+
+  # HTTP API — ~70% cheaper per call than REST API
+  # No auth needed: public read-only dashboard
+  BuilderRadarHttpApi:
+    Type: AWS::ApiGatewayV2::Api
+    Properties:
+      Name: !Sub "builderradar-api-${Env}"
+      ProtocolType: HTTP
+      Description: "BuilderRadar AI — read-only opportunity API"
+      CorsConfiguration:
+        AllowOrigins:
+          - "*"
+        AllowMethods:
+          - GET
+          - OPTIONS
+        AllowHeaders:
+          - Content-Type
+          - Authorization
+        MaxAge: 300
+
+  BuilderRadarHttpApiStage:
+    Type: AWS::ApiGatewayV2::Stage
+    Properties:
+      ApiId: !Ref BuilderRadarHttpApi
+      StageName: "$default"
+      AutoDeploy: true
+
+  ApiHandlerIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref BuilderRadarHttpApi
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !GetAtt ApiHandlerFunction.Arn
+      PayloadFormatVersion: "2.0"
+
+  ApiOpportunitiesRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref BuilderRadarHttpApi
+      RouteKey: "GET /opportunities"
+      Target: !Sub "integrations/${ApiHandlerIntegration}"
+
+  ApiHandlerPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !GetAtt ApiHandlerFunction.Arn
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${BuilderRadarHttpApi}/*/*/opportunities"
+
+# ---------------------------------------------------------------------------
+# Outputs — filled in Phase 8
+# ---------------------------------------------------------------------------
+Outputs:
+
+  ApiEndpoint:
+    Description: "HTTP API endpoint URL — use this in your frontend"
+    Value: !Sub "https://${BuilderRadarHttpApi}.execute-api.${AWS::Region}.amazonaws.com/opportunities"
+
+  OpportunitiesTableName:
+    Description: "DynamoDB table name — set this in agent/.bedrock_agentcore.yaml"
+    Value: !Ref OpportunitiesTable
+
+  OpportunitiesTableArn:
+    Description: "DynamoDB table ARN — used for scoping IAM policies"
+    Value: !GetAtt OpportunitiesTable.Arn
+
+  DevpostScraperFunctionArn:
+    Description: "Devpost scraper Lambda ARN"
+    Value: !GetAtt DevpostScraperFunction.Arn
+
+  UnstopScraperFunctionArn:
+    Description: "Unstop scraper Lambda ARN"
+    Value: !GetAtt UnstopScraperFunction.Arn
+
+  AgentTriggerFunctionArn:
+    Description: "Agent trigger Lambda ARN"
+    Value: !GetAtt AgentTriggerFunction.Arn
+
+  DeploymentNote:
+    Description: "After deploy: run 'agentcore launch' in the agent/ directory, then update AGENTCORE_AGENT_ID in AgentTriggerFunction env vars"
+    Value: "See agent/.bedrock_agentcore.yaml and tasks.md Phase 10 for deployment steps"

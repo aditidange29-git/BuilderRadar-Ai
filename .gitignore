@@ -1,0 +1,42 @@
+# ── Python ────────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+*.egg
+.venv/
+venv/
+env/
+.env
+.env.*
+!.env.local.example          # keep the example file, never the actual .env
+
+# ── SAM build artifacts ───────────────────────────────────────────────────────
+.aws-sam/
+
+# ── Sensitive / deployment state ──────────────────────────────────────────────
+samconfig.toml                # contains region + S3 bucket — regenerate on deploy
+cost-lockdown-policy.json     # IAM policy with account details
+agent/deploy_agent.py         # contains hardcoded account ID — exclude from public repo
+
+# ── Frontend ──────────────────────────────────────────────────────────────────
+frontend/node_modules/
+frontend/dist/
+frontend/.env.local           # contains live API URL — never commit
+frontend/.env.*.local
+
+# ── Kiro IDE ──────────────────────────────────────────────────────────────────
+.kiro/
+
+# ── OS / editor ───────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+.idea/
+.vscode/
+*.log

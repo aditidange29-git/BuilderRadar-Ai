@@ -1,0 +1,30 @@
+# samconfig.toml — SAM deployment defaults for BuilderRadar AI
+# First deploy:  sam build && sam deploy --guided
+# Subsequent:    sam build && sam deploy
+
+version = 0.1
+
+[default.global.parameters]
+stack_name = "builderradar-ai"
+
+[default.build.parameters]
+cached = true
+parallel = true
+
+[default.deploy.parameters]
+stack_name       = "builderradar-ai"
+region           = "us-east-1"
+capabilities     = "CAPABILITY_IAM CAPABILITY_NAMED_IAM"
+confirm_changeset = true
+resolve_s3       = true
+# S3 bucket for SAM artifacts — created automatically by resolve_s3
+# image_repositories = []
+
+# Override for prod: sam deploy --config-env prod
+[prod.deploy.parameters]
+stack_name        = "builderradar-ai-prod"
+region            = "us-east-1"
+capabilities      = "CAPABILITY_IAM CAPABILITY_NAMED_IAM"
+confirm_changeset = true
+resolve_s3        = true
+parameter_overrides = "Env=prod"
