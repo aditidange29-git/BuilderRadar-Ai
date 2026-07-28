@@ -1,0 +1,15 @@
+agents:
+  builderradar:
+    name: builderradar
+    entrypoint: agent.py
+    deployment_type: direct_code_deploy
+    runtime_type: PYTHON_3_13
+    language: python
+    memory:
+      mode: NO_MEMORY
+    aws:
+      account: "353842237441"
+      region: us-east-1
+      execution_role_auto_create: true
+
+default_agent: builderradar
