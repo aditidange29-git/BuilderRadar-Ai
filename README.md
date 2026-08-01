@@ -10,7 +10,7 @@
 
 ## Live Demo
 
-> **Dashboard:** _[Replace with your deployed frontend URL — e.g. Netlify link]_
+> **Dashboard:** [https://builder-radar-ai.netlify.app](https://builder-radar-ai.netlify.app)
 >
 > **API endpoint:** `https://7ah23zrgyi.execute-api.us-east-1.amazonaws.com/opportunities`
 

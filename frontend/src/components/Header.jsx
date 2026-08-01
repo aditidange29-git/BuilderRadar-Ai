@@ -37,7 +37,7 @@ export default function Header() {
             <a href="#opportunities" style={styles.navLink}>Opportunities</a>
             <a href="#how-it-works" style={styles.navLink}>About</a>
             <a
-              href="https://github.com"
+              href="https://github.com/aditidange18/builderradar-ai"
               target="_blank"
               rel="noopener noreferrer"
               style={styles.navLinkGhost}
