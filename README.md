@@ -273,6 +273,6 @@ This project is built for near-zero AWS spend. Every design decision was made wi
 
 ## Credits
 
-Built for the **AWS UG Madurai Kironomics Challenge**.
+Built for the **Weekend Challange: Turn Your Annoying Task into an App**.
 
 Uses the [Strands Agents SDK](https://strands.sela.ai) and [Amazon Bedrock AgentCore Runtime](https://aws.amazon.com/bedrock/agentcore/).
