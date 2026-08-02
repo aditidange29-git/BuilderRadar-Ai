@@ -226,9 +226,9 @@ In the AWS Console: **Billing → Budgets → Create budget**
 |---------|-------|
 | Type | Cost budget |
 | Period | Monthly |
-| Amount | $5.00 |
-| Alert 1 | 80% of budget ($4.00) — early warning |
-| Alert 2 | 100% of budget ($5.00) — hard limit |
+| Amount | $1.00 |
+| Alert 1 | 50% of budget ($0.5) — early warning |
+| Alert 2 | 100% of budget ($1.00) — hard limit |
 | Notification | Your email address |
 
 ---
